@@ -1,0 +1,15 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Node (only used for running the tests locally)
+node_modules/
+npm-debug.log*
+
+# Temp verification artifacts
+_*.js
+_*.html
+/tmp/
