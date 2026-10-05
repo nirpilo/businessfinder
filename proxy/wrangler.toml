@@ -1,0 +1,15 @@
+name = "businessfinder-reviews"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# The Google key is stored as a secret, NOT here:
+#   wrangler secret put GOOGLE_PLACES_API_KEY
+#
+# Deploy:
+#   npm install -g wrangler   # or: npx wrangler ...
+#   wrangler login
+#   wrangler deploy
+#
+# After deploy, Wrangler prints the Worker URL, e.g.
+#   https://businessfinder-reviews.<your-subdomain>.workers.dev
+# Put that URL into REVIEWS_PROXY_URL in ../app.js.

@@ -10,6 +10,9 @@ const {
   formatAddress,
   toBusiness,
   elementLatLng,
+  starString,
+  formatCount,
+  sortReviewsNewestFirst,
 } = require('./app.js');
 
 let passed = 0;
@@ -154,6 +157,49 @@ test('toBusiness falls back to contact:* tags for phone and website', () => {
   );
   assert.strictEqual(b.phone, '555-1234');
   assert.strictEqual(b.website, 'https://spa.example');
+});
+
+// --- starString ---
+test('starString renders full, half, and empty stars', () => {
+  assert.strictEqual(starString(5), '★★★★★');
+  assert.strictEqual(starString(0), '☆☆☆☆☆');
+  assert.strictEqual(starString(4.5), '★★★★½');
+  // 4.2 rounds to nearest half -> 4.0
+  assert.strictEqual(starString(4.2), '★★★★☆');
+  // 4.3 rounds to 4.5
+  assert.strictEqual(starString(4.3), '★★★★½');
+});
+
+test('starString returns empty string for null/NaN rating', () => {
+  assert.strictEqual(starString(null), '');
+  assert.strictEqual(starString(undefined), '');
+  assert.strictEqual(starString(NaN), '');
+});
+
+// --- formatCount ---
+test('formatCount adds thousands separators', () => {
+  assert.strictEqual(formatCount(0), '0');
+  assert.strictEqual(formatCount(42), '42');
+  assert.strictEqual(formatCount(1234), '1,234');
+  assert.strictEqual(formatCount(1000000), '1,000,000');
+});
+
+// --- sortReviewsNewestFirst ---
+test('sortReviewsNewestFirst orders by publishTime descending', () => {
+  const input = [
+    { author: 'old', publishTime: '2026-01-01T00:00:00Z' },
+    { author: 'new', publishTime: '2026-09-01T00:00:00Z' },
+    { author: 'mid', publishTime: '2026-05-01T00:00:00Z' },
+  ];
+  const out = sortReviewsNewestFirst(input);
+  assert.deepStrictEqual(out.map((r) => r.author), ['new', 'mid', 'old']);
+  // Does not mutate the input array.
+  assert.strictEqual(input[0].author, 'old');
+});
+
+test('sortReviewsNewestFirst tolerates empty/undefined', () => {
+  assert.deepStrictEqual(sortReviewsNewestFirst(), []);
+  assert.deepStrictEqual(sortReviewsNewestFirst([]), []);
 });
 
 console.log(`\n${passed} tests passed.`);

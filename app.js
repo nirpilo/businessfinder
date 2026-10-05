@@ -30,6 +30,23 @@ const CATEGORIES = [
 
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
 
+// Optional Google reviews proxy (Cloudflare Worker). Leave empty to disable the
+// ratings/reviews feature and keep the app fully free + keyless. When set, each
+// card lazily fetches the business's Google rating, review count, and up to 5
+// latest reviews. See proxy/README.md for how to deploy and get this URL.
+//
+// You can set this without editing this file by defining
+// window.BUSINESSFINDER_PROXY_URL (e.g. in a small config.js script tag) which
+// takes precedence over this default.
+const REVIEWS_PROXY_URL_DEFAULT = '';
+const REVIEWS_PROXY_URL =
+  (typeof window !== 'undefined' && window.BUSINESSFINDER_PROXY_URL) ||
+  REVIEWS_PROXY_URL_DEFAULT;
+
+// How many results per search to enrich with Google reviews. Capped to limit
+// Places API calls (billing) and keep the proxy's free tier comfortable.
+const MAX_REVIEW_LOOKUPS = 10;
+
 // --- State ----------------------------------------------------------------
 const state = {
   location: null, // { lat, lng }
@@ -126,6 +143,31 @@ function toBusiness(elm, origin) {
   };
 }
 
+// Build a star string like "★★★★☆" for a 0-5 rating (rounded to nearest half
+// shown as a filled star threshold). Returns '' for no rating.
+function starString(rating) {
+  if (rating == null || Number.isNaN(rating)) return '';
+  const rounded = Math.round(rating * 2) / 2; // nearest half
+  const full = Math.floor(rounded);
+  const half = rounded - full === 0.5;
+  const empty = 5 - full - (half ? 1 : 0);
+  return '★'.repeat(full) + (half ? '½' : '') + '☆'.repeat(empty);
+}
+
+// Format a review count like 1234 -> "1,234".
+function formatCount(n) {
+  if (!n) return '0';
+  return Number(n).toLocaleString('en-US');
+}
+
+// Sort an array of review objects newest-first by publishTime (ISO string).
+// Defensive: the proxy already sorts, but we re-sort in case of mixed sources.
+function sortReviewsNewestFirst(reviews) {
+  return [...(reviews || [])].sort(
+    (a, b) => new Date(b.publishTime || 0) - new Date(a.publishTime || 0)
+  );
+}
+
 // --- Rendering -------------------------------------------------------------
 
 function renderCategories() {
@@ -175,7 +217,9 @@ function renderResults(businesses, category) {
   }
   setStatus('');
 
-  for (const b of businesses) {
+  const reviewsEnabled = !!REVIEWS_PROXY_URL;
+
+  businesses.forEach((b, index) => {
     const li = document.createElement('li');
     li.className = 'result-card';
 
@@ -193,6 +237,17 @@ function renderResults(businesses, category) {
       actions.push(`<a class="action-link" href="${escapeHtml(b.website)}" target="_blank" rel="noopener">Website</a>`);
     }
 
+    // Reviews slot: shown only when the proxy is configured. Starts as a small
+    // loading line, then is filled in by enrichWithReviews().
+    const willEnrich = reviewsEnabled && index < MAX_REVIEW_LOOKUPS;
+    const reviewsSlot = reviewsEnabled
+      ? `<div class="result-reviews" data-reviews="${willEnrich ? 'pending' : 'skip'}">${
+          willEnrich
+            ? '<span class="reviews-loading"><span class="spinner" aria-hidden="true"></span>Loading Google reviews…</span>'
+            : ''
+        }</div>`
+      : '';
+
     li.innerHTML = `
       <div class="result-top">
         <h3 class="result-name">${escapeHtml(b.name)}</h3>
@@ -200,10 +255,79 @@ function renderResults(businesses, category) {
       </div>
       ${b.address ? `<p class="result-meta">${escapeHtml(b.address)}</p>` : ''}
       ${tags.length ? `<div class="result-tags">${tags.join('')}</div>` : ''}
+      ${reviewsSlot}
       <div class="result-actions">${actions.join('')}</div>
     `;
     el.resultsList.appendChild(li);
+
+    if (willEnrich) {
+      enrichWithReviews(b, li.querySelector('.result-reviews'));
+    }
+  });
+}
+
+// Fetch Google rating + reviews for one business via the proxy and render them
+// into the card's reviews slot. Failures degrade silently (slot is cleared).
+async function enrichWithReviews(business, slot) {
+  if (!slot) return;
+  try {
+    const url =
+      `${REVIEWS_PROXY_URL.replace(/\/$/, '')}/reviews` +
+      `?name=${encodeURIComponent(business.name)}` +
+      `&lat=${business.lat}&lng=${business.lng}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`proxy ${res.status}`);
+    const data = await res.json();
+    renderReviewsInto(slot, data);
+  } catch (err) {
+    console.warn('[BusinessFinder] reviews fetch failed:', err);
+    slot.innerHTML = ''; // degrade gracefully: no reviews shown
+    slot.dataset.reviews = 'error';
   }
+}
+
+// Render a reviews payload (from the proxy) into a card slot.
+function renderReviewsInto(slot, data) {
+  if (!data || !data.matched || (data.rating == null && !(data.reviews || []).length)) {
+    slot.innerHTML = '<p class="reviews-none">No Google rating yet.</p>';
+    slot.dataset.reviews = 'none';
+    return;
+  }
+
+  const ratingLine =
+    data.rating != null
+      ? `<div class="reviews-rating">
+           <span class="stars" aria-hidden="true">${starString(data.rating)}</span>
+           <span class="rating-value">${data.rating.toFixed(1)}</span>
+           <span class="rating-count">(${formatCount(data.userRatingCount)} reviews)</span>
+         </div>`
+      : '';
+
+  const reviews = sortReviewsNewestFirst(data.reviews).slice(0, 5);
+  const reviewItems = reviews
+    .map(
+      (r) => `
+      <li class="review-item">
+        <div class="review-head">
+          <span class="review-author">${escapeHtml(r.author || 'Anonymous')}</span>
+          ${r.rating != null ? `<span class="review-stars" aria-hidden="true">${starString(r.rating)}</span>` : ''}
+          ${r.relativeTime ? `<span class="review-time">${escapeHtml(r.relativeTime)}</span>` : ''}
+        </div>
+        ${r.text ? `<p class="review-text">${escapeHtml(r.text)}</p>` : ''}
+      </li>`
+    )
+    .join('');
+
+  const mapsLink = data.googleMapsUri
+    ? `<a class="reviews-more" href="${escapeHtml(data.googleMapsUri)}" target="_blank" rel="noopener">All reviews on Google &rsaquo;</a>`
+    : '';
+
+  slot.innerHTML = `
+    ${ratingLine}
+    ${reviewItems ? `<ul class="review-list">${reviewItems}</ul>` : ''}
+    ${mapsLink}
+  `;
+  slot.dataset.reviews = 'done';
 }
 
 // --- Actions ---------------------------------------------------------------
@@ -336,6 +460,9 @@ if (typeof module !== 'undefined' && module.exports) {
     formatAddress,
     toBusiness,
     elementLatLng,
+    starString,
+    formatCount,
+    sortReviewsNewestFirst,
   };
 } else {
   init();

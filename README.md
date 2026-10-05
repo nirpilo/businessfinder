@@ -32,6 +32,30 @@ python3 -m http.server 8731
 Geolocation and the service worker only work on `localhost` or HTTPS, not from a
 `file://` URL.
 
+## Google ratings and reviews (optional)
+
+Cards can show a Google **star rating**, **number of reviews**, and up to **5
+latest reviews** (newest first). This is off by default so the base app stays
+free and keyless.
+
+To turn it on, deploy the tiny Cloudflare Worker in [`proxy/`](proxy/README.md).
+It holds your Google Places API key server-side so the key never appears in the
+browser. Then point the app at the Worker, either by:
+
+- setting `window.BUSINESSFINDER_PROXY_URL` in a small script tag before
+  `app.js`, or
+- editing `REVIEWS_PROXY_URL_DEFAULT` in `app.js`.
+
+Notes and limits (set by Google's API, not this app):
+
+- Google returns at most **5** review texts per place. The total review count is
+  the real full number, but only up to 5 individual reviews are available.
+- There is no server-side "all reviews, newest first" feed; we sort the returned
+  reviews newest-first ourselves.
+- This uses the billed Places API (New). The proxy requests a minimal field set
+  and caches responses to keep usage low. Set a Google budget cap. See
+  [`proxy/README.md`](proxy/README.md).
+
 ## Deploy (free, no server)
 
 Drop the folder on any static host and you get an HTTPS URL your phone can open:
@@ -73,6 +97,7 @@ node app.test.js
 | `sw.js` | Service worker (offline shell) |
 | `manifest.json` | PWA manifest |
 | `icons/` | App icons (192, 512) |
+| `proxy/` | Optional Cloudflare Worker for Google ratings/reviews |
 
 ## Notes and limits
 
