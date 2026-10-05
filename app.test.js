@@ -13,6 +13,8 @@ const {
   starString,
   formatCount,
   sortReviewsNewestFirst,
+  googlePlaceUrl,
+  prettyDomain,
 } = require('./app.js');
 
 let passed = 0;
@@ -200,6 +202,33 @@ test('sortReviewsNewestFirst orders by publishTime descending', () => {
 test('sortReviewsNewestFirst tolerates empty/undefined', () => {
   assert.deepStrictEqual(sortReviewsNewestFirst(), []);
   assert.deepStrictEqual(sortReviewsNewestFirst([]), []);
+});
+
+// --- googlePlaceUrl ---
+test('googlePlaceUrl includes the business name and coords', () => {
+  const url = googlePlaceUrl({ name: 'Zen Massage', lat: 33.75, lng: -84.38 });
+  assert.ok(url.startsWith('https://www.google.com/maps/search/?api=1&query='));
+  assert.ok(url.includes(encodeURIComponent('Zen Massage 33.75,-84.38')));
+});
+
+test('googlePlaceUrl prefers an explicit Google place URI when given', () => {
+  const url = googlePlaceUrl(
+    { name: 'X', lat: 1, lng: 2 },
+    'https://maps.google.com/?cid=42'
+  );
+  assert.strictEqual(url, 'https://maps.google.com/?cid=42');
+});
+
+// --- prettyDomain ---
+test('prettyDomain strips scheme, www, and trailing slash', () => {
+  assert.strictEqual(prettyDomain('https://www.example.com/'), 'example.com');
+  assert.strictEqual(prettyDomain('http://example.com'), 'example.com');
+  assert.strictEqual(prettyDomain('https://sub.example.com/spa'), 'sub.example.com/spa');
+});
+
+test('prettyDomain returns empty string for empty input', () => {
+  assert.strictEqual(prettyDomain(''), '');
+  assert.strictEqual(prettyDomain(undefined), '');
 });
 
 console.log(`\n${passed} tests passed.`);

@@ -143,6 +143,27 @@ function toBusiness(elm, origin) {
   };
 }
 
+// Build a Google Maps URL that opens the REAL business place (name + coords),
+// not just a bare coordinate pin. Including the name makes Google resolve to the
+// actual listing with photos, reviews, and Street View. If a specific Google
+// place page is known (from the reviews proxy), prefer that exact URL.
+function googlePlaceUrl(business, googleMapsUri) {
+  if (googleMapsUri) return googleMapsUri;
+  const q = encodeURIComponent(`${business.name} ${business.lat},${business.lng}`);
+  return `https://www.google.com/maps/search/?api=1&query=${q}`;
+}
+
+// Turn a full URL into a short, readable label like "example.com".
+function prettyDomain(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    return u.hostname.replace(/^www\./, '') + (u.pathname !== '/' ? u.pathname.replace(/\/$/, '') : '');
+  } catch {
+    return url.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+  }
+}
+
 // Build a star string like "★★★★☆" for a 0-5 rating (rounded to nearest half
 // shown as a filled star threshold). Returns '' for no rating.
 function starString(rating) {
@@ -227,15 +248,36 @@ function renderResults(businesses, category) {
     if (b.cuisine) tags.push(`<span class="tag">${escapeHtml(b.cuisine.replace(/;/g, ', '))}</span>`);
     if (b.openingHours) tags.push(`<span class="tag">🕒 ${escapeHtml(b.openingHours)}</span>`);
 
+    const placeUrl = googlePlaceUrl(b);
+    const directionsUrl =
+      `https://www.google.com/maps/dir/?api=1&destination=` +
+      encodeURIComponent(`${b.name} ${b.lat},${b.lng}`);
+
     const actions = [];
-    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${b.lat},${b.lng}`;
-    actions.push(`<a class="action-link" href="${mapsUrl}" target="_blank" rel="noopener">Directions</a>`);
+    // Real Google location view (photos / Street View / the actual listing).
+    actions.push(
+      `<a class="action-link action-view" href="${placeUrl}" target="_blank" rel="noopener">View on Google</a>`
+    );
+    actions.push(
+      `<a class="action-link" href="${directionsUrl}" target="_blank" rel="noopener">Directions</a>`
+    );
     if (b.phone) {
       actions.push(`<a class="action-link" href="tel:${encodeURIComponent(b.phone)}">Call</a>`);
     }
     if (b.website) {
       actions.push(`<a class="action-link" href="${escapeHtml(b.website)}" target="_blank" rel="noopener">Website</a>`);
     }
+
+    // Address line: always present. Fall back to a Google place link when OSM
+    // has no structured address, so the user can still find the exact spot.
+    const addressLine = b.address
+      ? `<p class="result-meta result-address">📍 ${escapeHtml(b.address)}</p>`
+      : `<p class="result-meta result-address muted"><a href="${placeUrl}" target="_blank" rel="noopener">📍 See location on Google</a></p>`;
+
+    // Website line: readable, tappable domain shown on the card body.
+    const websiteLine = b.website
+      ? `<p class="result-meta result-website">🔗 <a href="${escapeHtml(b.website)}" target="_blank" rel="noopener">${escapeHtml(prettyDomain(b.website))}</a></p>`
+      : '';
 
     // Reviews slot: shown only when the proxy is configured. Starts as a small
     // loading line, then is filled in by enrichWithReviews().
@@ -253,7 +295,8 @@ function renderResults(businesses, category) {
         <h3 class="result-name">${escapeHtml(b.name)}</h3>
         <span class="result-distance">${formatDistance(b.distance)}</span>
       </div>
-      ${b.address ? `<p class="result-meta">${escapeHtml(b.address)}</p>` : ''}
+      ${addressLine}
+      ${websiteLine}
       ${tags.length ? `<div class="result-tags">${tags.join('')}</div>` : ''}
       ${reviewsSlot}
       <div class="result-actions">${actions.join('')}</div>
@@ -261,14 +304,14 @@ function renderResults(businesses, category) {
     el.resultsList.appendChild(li);
 
     if (willEnrich) {
-      enrichWithReviews(b, li.querySelector('.result-reviews'));
+      enrichWithReviews(b, li.querySelector('.result-reviews'), li);
     }
   });
 }
 
 // Fetch Google rating + reviews for one business via the proxy and render them
 // into the card's reviews slot. Failures degrade silently (slot is cleared).
-async function enrichWithReviews(business, slot) {
+async function enrichWithReviews(business, slot, card) {
   if (!slot) return;
   try {
     const url =
@@ -279,10 +322,50 @@ async function enrichWithReviews(business, slot) {
     if (!res.ok) throw new Error(`proxy ${res.status}`);
     const data = await res.json();
     renderReviewsInto(slot, data);
+    if (data && data.matched) upgradeCardFromGoogle(card, business, data);
   } catch (err) {
     console.warn('[BusinessFinder] reviews fetch failed:', err);
     slot.innerHTML = ''; // degrade gracefully: no reviews shown
     slot.dataset.reviews = 'error';
+  }
+}
+
+// When Google matched the place, upgrade the card's links/text with Google's
+// authoritative data: the exact place page, a real address, and a website if
+// OSM didn't have one.
+function upgradeCardFromGoogle(card, business, data) {
+  if (!card) return;
+
+  // Point "View on Google" (and the address fallback link) at the exact place.
+  if (data.googleMapsUri) {
+    for (const a of card.querySelectorAll('a.action-view, .result-address a')) {
+      a.setAttribute('href', data.googleMapsUri);
+    }
+  }
+
+  // Fill in the address from Google if OSM had none.
+  if (!business.address && data.formattedAddress) {
+    const addrEl = card.querySelector('.result-address');
+    if (addrEl) {
+      addrEl.classList.remove('muted');
+      addrEl.innerHTML = `📍 ${escapeHtml(data.formattedAddress)}`;
+    }
+  }
+
+  // Add a website line from Google if OSM had none.
+  if (!business.website && data.website) {
+    const hasWebsite = card.querySelector('.result-website');
+    if (!hasWebsite) {
+      const line = document.createElement('p');
+      line.className = 'result-meta result-website';
+      line.innerHTML = `🔗 <a href="${escapeHtml(data.website)}" target="_blank" rel="noopener">${escapeHtml(prettyDomain(data.website))}</a>`;
+      const addrEl = card.querySelector('.result-address');
+      if (addrEl && addrEl.nextSibling) {
+        addrEl.parentNode.insertBefore(line, addrEl.nextSibling);
+      } else {
+        card.querySelector('.result-top')?.after(line);
+      }
+    }
   }
 }
 
@@ -463,6 +546,8 @@ if (typeof module !== 'undefined' && module.exports) {
     starString,
     formatCount,
     sortReviewsNewestFirst,
+    googlePlaceUrl,
+    prettyDomain,
   };
 } else {
   init();

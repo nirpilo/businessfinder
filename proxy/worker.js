@@ -78,9 +78,11 @@ export default {
     const fieldMask = [
       'places.id',
       'places.displayName',
+      'places.formattedAddress',
       'places.rating',
       'places.userRatingCount',
       'places.googleMapsUri',
+      'places.websiteUri',
       'places.reviews',
     ].join(',');
 
@@ -144,6 +146,8 @@ export default {
       {
         matched: true,
         placeId: place.id || '',
+        formattedAddress: place.formattedAddress || '',
+        website: place.websiteUri || '',
         rating: place.rating ?? null,
         userRatingCount: place.userRatingCount ?? 0,
         googleMapsUri: place.googleMapsUri || '',

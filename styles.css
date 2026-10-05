@@ -244,6 +244,27 @@ select {
   color: var(--muted);
 }
 
+.result-address a,
+.result-website a {
+  color: var(--teal-dark);
+  text-decoration: none;
+  word-break: break-word;
+}
+
+.result-address a:active,
+.result-website a:active { text-decoration: underline; }
+
+.result-meta.muted a { color: var(--muted); }
+
+/* Make the primary "View on Google" action stand out from the rest. */
+.action-link.action-view {
+  background: var(--teal);
+  color: #fff;
+  border-color: var(--teal);
+}
+
+.action-link.action-view:active { background: var(--teal-dark); }
+
 .result-tags {
   margin: 8px 0 0;
   display: flex;
